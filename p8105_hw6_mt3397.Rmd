@@ -5,6 +5,7 @@ output: github_document
 
 ```{r setup, include=FALSE}
 library(tidyverse)
+library(modelr)
 
 knitr::opts_chunk$set(
   fig.width = 6,
@@ -96,27 +97,114 @@ models_results_df %>%
 ```
 
 ## Problem 2
-Compare on prediction error
 
-First: build the models specified using the code from cross validation lecture
+Read in and tidy data
 
-What model would work in this context? Start by picking variables that might be interesting and inserting them into models already known, look at residuals and see if there are patterns, are there any big issues in the dataset, etc.
+```{r}
+baby_df = 
+  read.csv("./data/birthweight.csv") %>% 
+  mutate(
+    babysex = as.factor(babysex),
+    frace = as.factor(frace),
+    malform = as.factor(malform),
+    mrace = as.factor(mrace)
+  )
+  
+any(is.na(baby_df))
+```
 
+The four categorical variables (sex of baby, race of father, race of mother, presence of malformation) have been converted from numeric to factor. There appears to be no missing data in this dataset.
 
-Load in data as baby_df
+```{r}
+proposed_model = lm(bwt ~ blength + gaweeks + babysex + wtgain, data = baby_df)
+broom::glance(proposed_model)
+broom::tidy(proposed_model) %>% 
+  select(-std.error, -statistic) %>% 
+  knitr::kable(digits = 3)
 
-weeks & bwt = lm(bwt ~ gaweeks, data = baby_df)
-main effects only = lm(bwt ~ blength + gaweeks, data = baby_df)
-
-Residuals:
 
 baby_df %>% 
-modelr::add_residuals(weeks & bwt) %>% 
-ggplot(aes(x = gaweeks, y = resid)) %>% 
-geom_point()
+  add_predictions(proposed_model) %>% 
+  add_residuals(proposed_model) %>% 
+  ggplot(aes(x = pred, y = resid))+
+  geom_point()
+
+baby_df %>% 
+  add_residuals(proposed_model) %>% 
+  ggplot(aes(x = resid))+ 
+  geom_density()
+```
+
+I thought it would be interesting to look at how sex of the baby and weight gain during pregnancy, in addition to the main effects of gestational weeks and length of baby at birth, would be related to the baby's birth weight. I know there are old wives' tales about how babies assigned male at birth tend to make women gain more weight in pregnancy, so I thought that it could be good to look into how each of these relate to birth weight.
+
+The scatterplot with predictions and residuals shows a few outliers, so I did a density plot to check the distribution of the residuals. The distribution looks quite normal, but the tail is quite a bit longer in the positive direction.
+
+```{r}
+main_effects_model = lm(bwt ~ blength + gaweeks, data = baby_df)
+proposed_model = lm(bwt ~ babysex + gaweeks + wtgain, data = baby_df)
+model_3 = lm(bwt ~ bhead + blength + babysex + bhead*blength + bhead*babysex + blength*babysex +
+               bhead*blength*babysex, data = baby_df)
+
+
+cv_df = 
+  crossv_mc(baby_df, 100) %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  )
+
+cv_df = 
+  cv_df %>% 
+  mutate(
+    main_effects_model = map(.x = train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+    proposed_model= map(.x = train, ~ lm(bwt ~ babysex + gaweeks + wtgain, data = .x)),
+    model_3 = map(.x = train, ~lm(bwt ~ bhead + blength + babysex + bhead*blength + bhead*babysex + 
+                                    blength*babysex + bhead*blength*babysex, data = .x))
+  ) %>% 
+  mutate(
+    rmse_main = map2_dbl(.x = main_effects_model, .y = test, ~rmse(model = .x, data = .y)),
+    rmse_proposed = map2_dbl(.x = proposed_model, .y = test, ~rmse(model = .x, data = .y)),
+    rmse_mod3 = map2_dbl(.x = model_3, .y = test, ~rmse(model = .x, data = .y))
+  )
+
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) %>% 
+  ggplot(aes(x = model, y = rmse)) +
+  geom_violin()
+```
+
+Model 3 has by far the lowest RMSEs, which indicates that this is the best model to fit the data. My proposed model is by far the worst in terms of RMSEs, so I will not try to enter the job field of model building.
 
 
 ## Problem 3
+
+Loading in data according to instructions in HW document.
+
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+
+
+```{r}
+
+```
 
 Fit model to dataset, make sure you can compute adjusted R2 and the log betas term
 broom::tidy, get estimated coefficients, may need to rearrange to get intercepts and estimates next to each other to multiply them
